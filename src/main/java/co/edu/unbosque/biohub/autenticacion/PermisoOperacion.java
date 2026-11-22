@@ -1,0 +1,10 @@
+package co.edu.unbosque.biohub.autenticacion;
+
+public enum PermisoOperacion {
+    CONSULTAR_HALLAZGO_PUBLICO,
+    CONSULTAR_COORDENADAS_EXACTAS,
+    REGISTRAR_HALLAZGO,
+    RECLASIFICAR_ESPECIE,
+    AUDITAR_HISTORIAL,
+    CONSUMIR_API_EXTERNA
+}
