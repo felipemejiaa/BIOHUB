@@ -9,12 +9,14 @@ import co.edu.unbosque.biohub.autenticacion.SesionUsuario;
 import co.edu.unbosque.biohub.hallazgos.dominio.AtributoDinamico;
 import co.edu.unbosque.biohub.hallazgos.dominio.Especie;
 import co.edu.unbosque.biohub.hallazgos.dominio.Hallazgo;
+import co.edu.unbosque.biohub.hallazgos.dominio.RolEnum;
 import co.edu.unbosque.biohub.hallazgos.dominio.TipoDato;
 import co.edu.unbosque.biohub.hallazgos.fichas.FichaAnfibio;
 import co.edu.unbosque.biohub.hallazgos.fichas.FichaAveMigratoria;
 import co.edu.unbosque.biohub.hallazgos.fichas.FichaPlanta;
 import co.edu.unbosque.biohub.hallazgos.fichas.FichaReptil;
 import co.edu.unbosque.biohub.hallazgos.fichas.FichaTaxonomica;
+import co.edu.unbosque.biohub.persistencia.BioHubRepositorioJdbc;
 import co.edu.unbosque.biohub.seguridad.AutorizacionUbicacion;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -31,6 +33,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
 
 @RestController
@@ -41,16 +44,19 @@ public class HallazgosBioHubController {
     private final ServicioReclasificacionTaxonomica servicioAuditoria;
     private final ServicioAutenticacionRol servicioAuth;
     private final AutorizacionUbicacion autorizacionUbicacion;
+    private final Optional<BioHubRepositorioJdbc> repoJdbc;
     private final AtomicLong secuenciaId = new AtomicLong(102L);
 
     public HallazgosBioHubController(List<Hallazgo> hallazgos,
                                      ServicioReclasificacionTaxonomica servicioAuditoria,
                                      ServicioAutenticacionRol servicioAuth,
-                                     AutorizacionUbicacion autorizacionUbicacion) {
+                                     AutorizacionUbicacion autorizacionUbicacion,
+                                     Optional<BioHubRepositorioJdbc> repoJdbc) {
         this.hallazgos = hallazgos;
         this.servicioAuditoria = servicioAuditoria;
         this.servicioAuth = servicioAuth;
         this.autorizacionUbicacion = autorizacionUbicacion;
+        this.repoJdbc = repoJdbc;
     }
 
     public record HallazgoVistaDTO(
@@ -153,28 +159,59 @@ public class HallazgosBioHubController {
                 ));
             }
 
-            long nuevoId = secuenciaId.getAndIncrement();
-            Especie especie = new Especie(
-                    nuevoId,
-                    request.nombreCientifico(),
-                    request.nombreComun(),
-                    request.estadoConservacion(),
-                    request.esSensible()
-            );
             LocalDateTime ahora = LocalDateTime.now();
-            Hallazgo nuevo = new Hallazgo(
-                    nuevoId,
-                    especie,
-                    request.latitud(),
-                    request.longitud(),
-                    request.departamento(),
-                    ahora,
-                    sesion.getUsuarioId(),
-                    atributos
-            );
+            Hallazgo nuevo;
+
+            if (repoJdbc.isPresent()) {
+                Especie especieBase = new Especie(
+                        null,
+                        request.nombreCientifico(),
+                        request.nombreComun(),
+                        request.estadoConservacion(),
+                        request.esSensible()
+                );
+                nuevo = repoJdbc.get().insertarHallazgo(
+                        especieBase,
+                        request.latitud(),
+                        request.longitud(),
+                        request.departamento(),
+                        ahora,
+                        sesion.getUsuarioId(),
+                        ficha.getGrupo(),
+                        atributos
+                );
+            } else {
+                long nuevoId = secuenciaId.getAndIncrement();
+                Especie especie = new Especie(
+                        nuevoId,
+                        request.nombreCientifico(),
+                        request.nombreComun(),
+                        request.estadoConservacion(),
+                        request.esSensible()
+                );
+                nuevo = new Hallazgo(
+                        nuevoId,
+                        especie,
+                        request.latitud(),
+                        request.longitud(),
+                        request.departamento(),
+                        ahora,
+                        sesion.getUsuarioId(),
+                        atributos
+                );
+            }
 
             hallazgos.add(nuevo);
             servicioAuditoria.registrarHallazgoInicial(nuevo, ahora);
+
+            if (repoJdbc.isPresent()) {
+                List<HallazgoMemento> historial = servicioAuditoria.auditarHistorialCompleto(
+                        nuevo.getId(),
+                        RolEnum.AUDITOR_CIENTIFICO
+                );
+                repoJdbc.get().guardarVersionMemento(historial.getLast());
+            }
+
             return ResponseEntity.status(HttpStatus.CREATED).body(nuevo);
         } catch (SecurityException ex) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", ex.getMessage()));
@@ -199,13 +236,14 @@ public class HallazgosBioHubController {
                     request.estadoConservacion(),
                     request.esSensible()
             );
+            LocalDateTime fechaReclasificacion = LocalDateTime.parse(request.fechaReclasificacion());
             Hallazgo actualizado = servicioAuditoria.reclasificar(
                     id,
                     nuevaEspecie,
                     sesion.getUsername(),
                     sesion.getRol(),
                     request.motivo(),
-                    LocalDateTime.parse(request.fechaReclasificacion())
+                    fechaReclasificacion
             );
 
             for (int i = 0; i < hallazgos.size(); i++) {
@@ -214,6 +252,15 @@ public class HallazgosBioHubController {
                     break;
                 }
             }
+
+            if (repoJdbc.isPresent()) {
+                List<HallazgoMemento> historial = servicioAuditoria.auditarHistorialCompleto(
+                        id,
+                        sesion.getRol()
+                );
+                repoJdbc.get().guardarVersionMemento(historial.getLast());
+            }
+
             return ResponseEntity.ok(actualizado);
         } catch (SecurityException ex) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", ex.getMessage()));

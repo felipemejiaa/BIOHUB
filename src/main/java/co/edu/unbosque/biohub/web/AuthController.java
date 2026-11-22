@@ -3,6 +3,7 @@ package co.edu.unbosque.biohub.web;
 import co.edu.unbosque.biohub.autenticacion.ServicioAutenticacionRol;
 import co.edu.unbosque.biohub.autenticacion.SesionUsuario;
 import co.edu.unbosque.biohub.hallazgos.dominio.RolEnum;
+import co.edu.unbosque.biohub.persistencia.BioHubRepositorioJdbc;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 @RestController
@@ -20,9 +22,12 @@ import java.util.UUID;
 public class AuthController {
 
     private final ServicioAutenticacionRol servicioAuth;
+    private final Optional<BioHubRepositorioJdbc> repoJdbc;
 
-    public AuthController(ServicioAutenticacionRol servicioAuth) {
+    public AuthController(ServicioAutenticacionRol servicioAuth,
+                          Optional<BioHubRepositorioJdbc> repoJdbc) {
         this.servicioAuth = servicioAuth;
+        this.repoJdbc = repoJdbc;
     }
 
     public record LoginRequest(String username, String password) {}
@@ -36,9 +41,12 @@ public class AuthController {
             return ResponseEntity.badRequest()
                     .body(Map.of("error", "Usuario, contraseña y rol son obligatorios"));
         }
+        String username = request.username().trim();
         String id = "U-" + UUID.randomUUID().toString().substring(0, 6).toUpperCase();
-        servicioAuth.registrarUsuario(id, request.username().trim(), request.password(), request.rol());
-        SesionUsuario sesion = servicioAuth.iniciarSesion(request.username().trim(), request.password());
+
+        repoJdbc.ifPresent(repo -> repo.guardarUsuario(id, username, request.password(), request.rol()));
+        servicioAuth.registrarUsuario(id, username, request.password(), request.rol());
+        SesionUsuario sesion = servicioAuth.iniciarSesion(username, request.password());
         return ResponseEntity.status(HttpStatus.CREATED).body(sesion);
     }
 
