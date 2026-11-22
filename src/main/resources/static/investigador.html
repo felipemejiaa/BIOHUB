@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BioHub · Investigador de Campo</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header>
+    <h1>BioHub · Estación del Investigador de Campo</h1>
+    <div class="nav-acciones">
+        <span class="badge-sesion" id="estadoHeader">Verificando...</span>
+        <button type="button" class="header-btn" onclick="cerrarSesionYSalir()">Cerrar Sesión</button>
+    </div>
+</header>
+
+<div class="contenedor-panel">
+    <section class="card">
+        <h2>Registrar Hallazgo por Grupo Taxonómico (HU-04)</h2>
+        <label for="grupoSelect">Grupo Taxonómico (Factory Method)</label>
+        <select id="grupoSelect" onchange="cargarCamposFicha()">
+            <option value="ANFIBIO">ANFIBIO</option>
+            <option value="AVE_MIGRATORIA">AVE_MIGRATORIA</option>
+            <option value="PLANTA">PLANTA</option>
+            <option value="REPTIL">REPTIL</option>
+        </select>
+
+        <label for="nombreCientifico">Nombre Científico</label>
+        <input id="nombreCientifico" type="text" placeholder="Ej. Atelopus ignescens">
+
+        <label for="nombreComun">Nombre Común</label>
+        <input id="nombreComun" type="text" placeholder="Ej. Jambato negro">
+
+        <label for="departamento">Departamento</label>
+        <input id="departamento" type="text" value="Nariño">
+
+        <label for="latitud">Latitud</label>
+        <input id="latitud" type="number" step="any" value="1.2136">
+
+        <label for="longitud">Longitud</label>
+        <input id="longitud" type="number" step="any" value="-77.2811">
+
+        <label for="esSensible">¿Especie sensible?</label>
+        <select id="esSensible">
+            <option value="true">Sí (Ocultar coordenadas al público)</option>
+            <option value="false">No</option>
+        </select>
+
+        <div id="camposDinamicosContainer"></div>
+
+        <button type="button" onclick="guardarHallazgo()">Guardar Hallazgo</button>
+        <div id="salidaInvestigador"></div>
+    </section>
+
+    <section class="card">
+        <h2>Hallazgos Registrados en Campo</h2>
+        <div id="listaHallazgosInvestigador"></div>
+    </section>
+</div>
+
+<script src="/auth.js"></script>
+<script>
+    let atributosActuales = [];
+
+    async function inicializarInvestigador() {
+        const sesion = await verificarAccesoPagina(['INVESTIGADOR_CAMPO']);
+        if (!sesion) return;
+        await cargarCamposFicha();
+        await cargarHallazgos();
+    }
+
+    async function cargarCamposFicha() {
+        const grupo = document.getElementById('grupoSelect').value;
+        const resp = await fetch(`/api/biohub/fichas/${grupo}/requeridos`, { headers: headersAuth() });
+        const data = await resp.json();
+        atributosActuales = data.atributosRequeridos || [];
+
+        document.getElementById('camposDinamicosContainer').innerHTML = atributosActuales.map(attr => `
+            <label for="attr_${attr}">Atributo obligatorio: ${attr}</label>
+            <input id="attr_${attr}" type="text" placeholder="Ingrese ${attr}">
+        `).join('');
+    }
+
+    async function guardarHallazgo() {
+        const atributos = atributosActuales.map(attr => {
+            const valor = document.getElementById(`attr_${attr}`).value.trim();
+            const esDecimal = attr.toLowerCase().includes('temperatura') || attr.toLowerCase().includes('altitud');
+            return {
+                nombre: attr,
+                tipo: esDecimal ? 'DECIMAL' : 'TEXTO',
+                valor: valor
+            };
+        });
+
+        const payload = {
+            grupoTaxonomico: document.getElementById('grupoSelect').value,
+            nombreCientifico: document.getElementById('nombreCientifico').value.trim(),
+            nombreComun: document.getElementById('nombreComun').value.trim(),
+            estadoConservacion: 'EN',
+            esSensible: document.getElementById('esSensible').value === 'true',
+            latitud: parseFloat(document.getElementById('latitud').value),
+            longitud: parseFloat(document.getElementById('longitud').value),
+            departamento: document.getElementById('departamento').value.trim(),
+            atributos: atributos
+        };
+
+        const resp = await fetch('/api/biohub/hallazgos', {
+            method: 'POST',
+            headers: headersAuth(),
+            body: JSON.stringify(payload)
+        });
+        const data = await resp.json();
+        const box = document.getElementById('salidaInvestigador');
+
+        if (!resp.ok) {
+            box.className = 'alerta error';
+            box.textContent = data.faltantes
+                ? `${data.error}: ${data.faltantes.join(', ')}`
+                : data.error;
+            return;
+        }
+
+        box.className = 'alerta ok';
+        box.textContent = `Hallazgo #${data.id} (${data.especie.nombreCientifico}) registrado correctamente.`;
+        await cargarHallazgos();
+    }
+
+    async function cargarHallazgos() {
+        const resp = await fetch('/api/biohub/hallazgos', { headers: headersAuth() });
+        const hallazgos = await resp.json();
+
+        document.getElementById('listaHallazgosInvestigador').innerHTML = hallazgos.map(h => `
+            <div class="hallazgo-card">
+                <span class="tag">Hallazgo #${h.id}</span>
+                <h3 style="margin:0.4rem 0;">${h.nombreCientifico} <small>(${h.nombreComun})</small></h3>
+                <p style="margin:0.2rem 0;"><strong>Ubicación visible:</strong> ${h.ubicacionVisible}</p>
+            </div>
+        `).join('');
+    }
+
+    inicializarInvestigador();
+</script>
+</body>
+</html>

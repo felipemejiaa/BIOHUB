@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BioHub · Auditor Científico</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header>
+    <h1>BioHub · Auditoría Taxonómica</h1>
+    <div class="nav-acciones">
+        <span class="badge-sesion" id="estadoHeader">Verificando...</span>
+        <button type="button" class="header-btn" onclick="cerrarSesionYSalir()">Cerrar Sesión</button>
+    </div>
+</header>
+
+<div class="contenedor-unico">
+    <section class="card">
+        <h2>Trazabilidad e Historial de Reclasificaciones (HU-05 · Patrón Memento)</h2>
+        <label for="hallazgoAuditorSelect">Seleccionar Hallazgo a Auditar</label>
+        <select id="hallazgoAuditorSelect"></select>
+
+        <button type="button" onclick="verLineaTiempo()">Consultar Línea de Tiempo Completa</button>
+        <button type="button" class="secundario" onclick="compararEneroDiciembre()">Comparar Enero vs. Diciembre</button>
+
+        <div id="salidaAuditor"></div>
+        <div id="timelineAuditor" style="margin-top:1rem;"></div>
+    </section>
+</div>
+
+<script src="/auth.js"></script>
+<script>
+    async function inicializarAuditor() {
+        const sesion = await verificarAccesoPagina(['AUDITOR_CIENTIFICO']);
+        if (!sesion) return;
+
+        const resp = await fetch('/api/biohub/hallazgos', { headers: headersAuth() });
+        const hallazgos = await resp.json();
+        document.getElementById('hallazgoAuditorSelect').innerHTML = hallazgos.map(h =>
+            `<option value="${h.id}">Hallazgo #${h.id} - ${h.nombreCientifico} (${h.ubicacionVisible})</option>`
+        ).join('');
+    }
+
+    async function verLineaTiempo() {
+        const id = document.getElementById('hallazgoAuditorSelect').value;
+        const resp = await fetch(`/api/biohub/hallazgos/${id}/historial`, { headers: headersAuth() });
+        const data = await resp.json();
+        const timeline = document.getElementById('timelineAuditor');
+
+        timeline.innerHTML = data.map(m => `
+            <div class="timeline-item">
+                <strong>Versión ${m.version}: ${m.estadoHallazgo.especie.nombreCientifico}</strong> (${m.estadoHallazgo.especie.nombreComun})<br>
+                <small>Fecha: ${m.fechaVersion} · Autorizó: ${m.autorizadoPor} (${m.rolAutorizador})</small><br>
+                <span>Motivo: ${m.motivo}</span>
+            </div>
+        `).join('');
+    }
+
+    async function compararEneroDiciembre() {
+        const id = document.getElementById('hallazgoAuditorSelect').value;
+        const url = `/api/biohub/hallazgos/${id}/comparar?inicio=2026-01-31T23:59:00&fin=2026-12-31T23:59:00`;
+        const resp = await fetch(url, { headers: headersAuth() });
+        const data = await resp.json();
+        const box = document.getElementById('salidaAuditor');
+
+        if (!resp.ok) {
+            box.className = 'alerta error';
+            box.textContent = data.error;
+            return;
+        }
+        box.className = 'alerta ok';
+        box.textContent =
+            `Enero (v${data.versionAnterior}): ${data.especieAnterior.nombreCientifico}\n` +
+            `Diciembre (v${data.versionPosterior}): ${data.especiePosterior.nombreCientifico}\n` +
+            `Autorizó: ${data.autorizadoPorPosterior} | Motivo: ${data.motivoCambio}`;
+    }
+
+    inicializarAuditor();
+</script>
+</body>
+</html>

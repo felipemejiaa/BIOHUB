@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BioHub · Director Científico</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header>
+    <h1>BioHub · Panel del Director Científico</h1>
+    <div class="nav-acciones">
+        <span class="badge-sesion" id="estadoHeader">Verificando...</span>
+        <button type="button" class="header-btn" onclick="cerrarSesionYSalir()">Cerrar Sesión</button>
+    </div>
+</header>
+
+<div class="contenedor-panel">
+    <section class="card">
+        <h2>Hallazgos con Coordenadas Exactas (HU-03)</h2>
+        <p style="font-size:0.85rem; margin-top:0;">
+            Como Director Científico visualizas latitud, longitud y departamento exactos de especies sensibles.
+        </p>
+        <div id="listaHallazgosDirector"></div>
+    </section>
+
+    <section class="card">
+        <h2>Reclasificación Taxonómica (HU-05)</h2>
+        <label for="hallazgoIdSelect">Seleccionar Hallazgo</label>
+        <select id="hallazgoIdSelect"></select>
+
+        <label for="nombreCientifico">Nueva Especie (Nombre Científico)</label>
+        <input id="nombreCientifico" type="text" value="Andinobates viridis">
+
+        <label for="nombreComun">Nombre Común</label>
+        <input id="nombreComun" type="text" value="Rana verde del Chocó">
+
+        <label for="estadoConservacion">Estado de Conservación</label>
+        <select id="estadoConservacion">
+            <option value="EN">EN (En Peligro)</option>
+            <option value="CR">CR (En Peligro Crítico)</option>
+            <option value="VU">VU (Vulnerable)</option>
+            <option value="LC">LC (Preocupación Menor)</option>
+        </select>
+
+        <label for="motivo">Motivo Científico</label>
+        <input id="motivo" type="text" value="Secuenciación genética confirma nueva especie">
+
+        <label for="fechaReclasificacion">Fecha de Reclasificación (ISO)</label>
+        <input id="fechaReclasificacion" type="text" value="2026-12-10T14:00:00">
+
+        <button type="button" onclick="reclasificar()">Autorizar Reclasificación</button>
+        <div id="salidaDirector"></div>
+    </section>
+</div>
+
+<script src="/auth.js"></script>
+<script>
+    async function inicializarDirector() {
+        const sesion = await verificarAccesoPagina(['DIRECTOR_CIENTIFICO']);
+        if (!sesion) return;
+        await cargarHallazgosDirector();
+    }
+
+    async function cargarHallazgosDirector() {
+        const resp = await fetch('/api/biohub/hallazgos', { headers: headersAuth() });
+        const hallazgos = await resp.json();
+
+        document.getElementById('listaHallazgosDirector').innerHTML = hallazgos.map(h => `
+            <div class="hallazgo-card ${h.esSensible ? 'sensible' : ''}">
+                <div>
+                    <span class="tag">Hallazgo #${h.id}</span>
+                    <span class="tag">${h.estadoConservacion}</span>
+                    ${h.esSensible ? '<span class="tag alerta-tag">Especie Sensible</span>' : ''}
+                </div>
+                <h3 style="margin:0.5rem 0 0.25rem 0;">${h.nombreCientifico} <small>(${h.nombreComun})</small></h3>
+                <p style="margin:0.25rem 0;"><strong>Departamento:</strong> ${h.departamento}</p>
+                <p style="margin:0.25rem 0;"><strong>Coordenadas Exactas:</strong> ${h.ubicacionVisible}</p>
+            </div>
+        `).join('');
+
+        document.getElementById('hallazgoIdSelect').innerHTML = hallazgos.map(h =>
+            `<option value="${h.id}">Hallazgo #${h.id} - ${h.nombreCientifico}</option>`
+        ).join('');
+    }
+
+    async function reclasificar() {
+        const id = document.getElementById('hallazgoIdSelect').value;
+        const payload = {
+            nuevaEspecieId: Date.now(),
+            nombreCientifico: document.getElementById('nombreCientifico').value,
+            nombreComun: document.getElementById('nombreComun').value,
+            estadoConservacion: document.getElementById('estadoConservacion').value,
+            esSensible: true,
+            motivo: document.getElementById('motivo').value,
+            fechaReclasificacion: document.getElementById('fechaReclasificacion').value
+        };
+
+        const resp = await fetch(`/api/biohub/hallazgos/${id}/reclasificar`, {
+            method: 'POST',
+            headers: headersAuth(),
+            body: JSON.stringify(payload)
+        });
+        const data = await resp.json();
+        const box = document.getElementById('salidaDirector');
+
+        if (resp.ok) {
+            box.className = 'alerta ok';
+            box.textContent = `Hallazgo #${id} reclasificado a ${data.especie.nombreCientifico}.`;
+            await cargarHallazgosDirector();
+        } else {
+            box.className = 'alerta error';
+            box.textContent = data.error;
+        }
+    }
+
+    inicializarDirector();
+</script>
+</body>
+</html>
