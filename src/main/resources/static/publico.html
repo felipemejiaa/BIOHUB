@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BioHub · Consulta Pública</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header>
+    <h1>BioHub · Consulta Pública de Hallazgos</h1>
+    <div class="nav-acciones">
+        <span class="badge-sesion" id="estadoHeader">VISITANTE_PUBLICO</span>
+        <button type="button" class="header-btn" onclick="cerrarSesionYSalir()">Iniciar Sesión</button>
+    </div>
+</header>
+
+<div class="contenedor-unico">
+    <section class="card">
+        <h2>Hallazgos Registrados (HU-02 · Ubicación Protegida)</h2>
+        <p style="font-size:0.85rem; margin-top:0;">
+            Por seguridad biológica, para este perfil solo se muestra el departamento y se ocultan las coordenadas exactas.
+        </p>
+        <div id="listaHallazgosPublicos"></div>
+    </section>
+</div>
+
+<script src="/auth.js"></script>
+<script>
+    async function inicializarPublico() {
+        const sesion = await verificarAccesoPagina(['VISITANTE_PUBLICO', 'CONSUMIDOR_EXTERNO']);
+        if (!sesion) return;
+
+        const resp = await fetch('/api/biohub/hallazgos', { headers: headersAuth() });
+        const hallazgos = await resp.json();
+
+        document.getElementById('listaHallazgosPublicos').innerHTML = hallazgos.map(h => `
+            <div class="hallazgo-card ${h.esSensible ? 'sensible' : ''}">
+                <div>
+                    <span class="tag">Hallazgo #${h.id}</span>
+                    <span class="tag">${h.estadoConservacion}</span>
+                    ${h.esSensible ? '<span class="tag alerta-tag">Especie Sensible · Coordenadas Ocultas</span>' : ''}
+                </div>
+                <h3 style="margin:0.5rem 0 0.25rem 0;">${h.nombreCientifico} <small>(${h.nombreComun})</small></h3>
+                <p style="margin:0.25rem 0;"><strong>Ubicación visible:</strong> ${h.ubicacionVisible}</p>
+            </div>
+        `).join('');
+    }
+    inicializarPublico();
+</script>
+</body>
+</html>
