@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BioHub · Registro</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header>
+    <h1>BioHub · Registro de Usuarios</h1>
+    <div class="nav-acciones">
+        <button type="button" class="header-btn" onclick="window.location.href='/index.html'">Volver al Login</button>
+    </div>
+</header>
+
+<div class="contenedor-centrado">
+    <section class="card">
+        <h2>Crear Cuenta en BioHub (HU-01)</h2>
+        <label for="regUsername">Usuario</label>
+        <input id="regUsername" type="text" placeholder="Ej. camilo.biologo">
+
+        <label for="regPassword">Contraseña</label>
+        <input id="regPassword" type="password" placeholder="Ingresa una contraseña">
+
+        <label for="regRol">Rol asignado</label>
+        <select id="regRol">
+            <option value="INVESTIGADOR_CAMPO">Investigador de Campo</option>
+            <option value="DIRECTOR_CIENTIFICO">Director Científico</option>
+            <option value="AUDITOR_CIENTIFICO">Auditor Científico</option>
+            <option value="CONSUMIDOR_EXTERNO">Consumidor Externo</option>
+        </select>
+
+        <button type="button" class="btn-bloque" onclick="procesarRegistro()">Registrar e Ingresar</button>
+        <div id="mensajeRegistro"></div>
+
+        <div class="enlace-pie">
+            ¿Ya tienes cuenta? <a href="/index.html">Inicia sesión</a>
+        </div>
+    </section>
+</div>
+
+<script src="/auth.js"></script>
+<script>
+    async function procesarRegistro() {
+        const username = document.getElementById('regUsername').value.trim();
+        const password = document.getElementById('regPassword').value;
+        const rol = document.getElementById('regRol').value;
+        const box = document.getElementById('mensajeRegistro');
+
+        const resp = await fetch('/api/auth/registro', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password, rol })
+        });
+        const data = await resp.json();
+
+        if (!resp.ok) {
+            box.className = 'alerta error';
+            box.textContent = data.error;
+            return;
+        }
+
+        guardarToken(data.token);
+        redirigirSegunRol(data.rol);
+    }
+</script>
+</body>
+</html>

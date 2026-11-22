@@ -1,10 +1,10 @@
 package co.edu.unbosque.biohub.auditoria;
 
-import java.time.LocalDateTime;
-import java.util.Objects;
-
 import co.edu.unbosque.biohub.hallazgos.dominio.Hallazgo;
 import co.edu.unbosque.biohub.hallazgos.dominio.RolEnum;
+
+import java.time.LocalDateTime;
+import java.util.Objects;
 
 public final class HallazgoMemento {
 
