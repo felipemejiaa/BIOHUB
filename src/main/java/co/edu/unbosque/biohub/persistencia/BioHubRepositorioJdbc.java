@@ -6,6 +6,7 @@ import co.edu.unbosque.biohub.hallazgos.dominio.Especie;
 import co.edu.unbosque.biohub.hallazgos.dominio.Hallazgo;
 import co.edu.unbosque.biohub.hallazgos.dominio.RolEnum;
 import co.edu.unbosque.biohub.hallazgos.dominio.TipoDato;
+import co.edu.unbosque.biohub.hallazgos.fichas.CatalogoAtributosTaxonomicos;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -54,7 +55,7 @@ public class BioHubRepositorioJdbc {
     public List<Hallazgo> listarHallazgos() {
         String sql = """
                 SELECT h.id AS h_id, h.latitud, h.longitud, h.departamento, h.fecha_observacion,
-                       h.investigador_id, h.atributos::text AS atributos_json,
+                       h.investigador_id, h.grupo_taxonomico, h.atributos::text AS atributos_json,
                        e.id AS e_id, e.nombre_cientifico, e.nombre_comun, e.estado_conservacion, e.es_sensible
                 FROM hallazgo h
                 JOIN especie e ON h.especie_id = e.id
@@ -76,9 +77,46 @@ public class BioHubRepositorioJdbc {
                     rs.getString("departamento"),
                     rs.getTimestamp("fecha_observacion").toLocalDateTime(),
                     rs.getString("investigador_id"),
-                    parsearAtributosJson(rs.getString("atributos_json"))
+                    parsearAtributosJson(rs.getString("atributos_json"), rs.getString("grupo_taxonomico"))
             );
         });
+    }
+
+    public Map<String, Map<String, TipoDato>> listarAtributosPorGrupo() {
+        String sql = """
+                SELECT grupo_taxonomico, atributos_requeridos::text AS atributos_json
+                FROM configuracion_grupo_taxonomico
+                ORDER BY grupo_taxonomico
+                """;
+        List<Map.Entry<String, Map<String, TipoDato>>> filas = jdbc.query(
+                sql,
+                (rs, rowNum) -> Map.entry(
+                        rs.getString("grupo_taxonomico"),
+                        parsearDefinicionAtributosJson(rs.getString("atributos_json"))
+                )
+        );
+        Map<String, Map<String, TipoDato>> resultado = new LinkedHashMap<>();
+        for (Map.Entry<String, Map<String, TipoDato>> fila : filas) {
+            resultado.put(fila.getKey(), fila.getValue());
+        }
+        return resultado;
+    }
+
+    public void guardarAtributosGrupo(String grupoTaxonomico, Map<String, TipoDato> atributos) {
+        if (grupoTaxonomico == null || grupoTaxonomico.isBlank()) {
+            throw new IllegalArgumentException("El grupo taxonómico es obligatorio");
+        }
+        String grupoNormalizado = grupoTaxonomico.trim().toUpperCase();
+        jdbc.update(
+                """
+                INSERT INTO configuracion_grupo_taxonomico (grupo_taxonomico, atributos_requeridos)
+                VALUES (?, ?::jsonb)
+                ON CONFLICT (grupo_taxonomico)
+                DO UPDATE SET atributos_requeridos = EXCLUDED.atributos_requeridos
+                """,
+                grupoNormalizado,
+                serializarDefinicionAtributosJson(atributos)
+        );
     }
 
     public Hallazgo insertarHallazgo(Especie especie, double latitud, double longitud,
@@ -171,14 +209,56 @@ public class BioHubRepositorioJdbc {
         }
     }
 
-    private List<AtributoDinamico> parsearAtributosJson(String json) {
+    private List<AtributoDinamico> parsearAtributosJson(String json, String grupoTaxonomico) {
         try {
-            Map<String, String> mapa = mapper.readValue(json, new TypeReference<>() {});
+            Map<String, String> mapa = mapper.readValue(json, new TypeReference<LinkedHashMap<String, String>>() {});
+            Map<String, TipoDato> definicion = CatalogoAtributosTaxonomicos.obtenerAtributos(grupoTaxonomico);
             List<AtributoDinamico> lista = new ArrayList<>();
-            mapa.forEach((k, v) -> lista.add(new AtributoDinamico(k, TipoDato.TEXTO, v)));
+            mapa.forEach((k, v) -> lista.add(new AtributoDinamico(
+                    k,
+                    definicion.getOrDefault(k, TipoDato.TEXTO),
+                    v
+            )));
             return lista;
         } catch (Exception e) {
             return List.of();
+        }
+    }
+
+    private String serializarDefinicionAtributosJson(Map<String, TipoDato> atributos) {
+        try {
+            Map<String, String> mapa = new LinkedHashMap<>();
+            if (atributos != null) {
+                atributos.forEach((nombre, tipo) -> {
+                    if (nombre != null && !nombre.isBlank() && tipo != null) {
+                        mapa.put(nombre.trim(), tipo.name());
+                    }
+                });
+            }
+            return mapper.writeValueAsString(mapa);
+        } catch (Exception e) {
+            return "{}";
+        }
+    }
+
+    private Map<String, TipoDato> parsearDefinicionAtributosJson(String json) {
+        try {
+            Map<String, String> mapa = mapper.readValue(json, new TypeReference<LinkedHashMap<String, String>>() {});
+            Map<String, TipoDato> definicion = new LinkedHashMap<>();
+            mapa.forEach((nombre, tipoStr) -> {
+                TipoDato tipo = TipoDato.TEXTO;
+                if (tipoStr != null && !tipoStr.isBlank()) {
+                    try {
+                        tipo = TipoDato.valueOf(tipoStr.trim().toUpperCase());
+                    } catch (IllegalArgumentException ignored) {
+                        tipo = TipoDato.TEXTO;
+                    }
+                }
+                definicion.put(nombre, tipo);
+            });
+            return definicion;
+        } catch (Exception e) {
+            return Map.of();
         }
     }
 }

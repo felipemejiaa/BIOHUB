@@ -20,3 +20,11 @@ VALUES
 (5, 5, -1.6417, -69.9400, 'Amazonas', '2026-05-18 07:45:00', 'INV-004', 'REPTIL',
  '{"longitudCorporal": "0.85", "fotoEscamas": "charapa_002.jpg"}')
 ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO configuracion_grupo_taxonomico (grupo_taxonomico, atributos_requeridos)
+VALUES
+('ANFIBIO', '{"temperaturaAgua": "DECIMAL", "grabacionAcustica": "TEXTO"}'::jsonb),
+('AVE_MIGRATORIA', '{"rutaGps": "TEXTO", "muestraAdn": "TEXTO"}'::jsonb),
+('PLANTA', '{"alturaTallo": "DECIMAL", "muestraHerbario": "TEXTO"}'::jsonb),
+('REPTIL', '{"longitudCorporal": "DECIMAL", "fotoEscamas": "TEXTO"}'::jsonb)
+ON CONFLICT (grupo_taxonomico) DO NOTHING;

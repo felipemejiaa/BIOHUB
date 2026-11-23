@@ -4,6 +4,8 @@ import co.edu.unbosque.biohub.auditoria.ServicioReclasificacionTaxonomica;
 import co.edu.unbosque.biohub.autenticacion.ServicioAutenticacionRol;
 import co.edu.unbosque.biohub.hallazgos.dominio.Hallazgo;
 import co.edu.unbosque.biohub.hallazgos.dominio.RolEnum;
+import co.edu.unbosque.biohub.hallazgos.dominio.TipoDato;
+import co.edu.unbosque.biohub.hallazgos.fichas.CatalogoAtributosTaxonomicos;
 import jakarta.annotation.PostConstruct;
 import org.springframework.context.annotation.Profile;
 import org.springframework.core.io.ClassPathResource;
@@ -13,6 +15,7 @@ import org.springframework.stereotype.Component;
 
 import javax.sql.DataSource;
 import java.util.List;
+import java.util.Map;
 
 @Component
 @Profile("postgres")
@@ -59,6 +62,9 @@ public class SincronizadorPostgresStartup {
         for (BioHubRepositorioJdbc.UsuarioFila u : repo.listarUsuarios()) {
             servicioAuth.registrarUsuario(u.id(), u.username(), u.passwordHash(), u.rol());
         }
+
+        Map<String, Map<String, TipoDato>> definiciones = repo.listarAtributosPorGrupo();
+        definiciones.forEach(CatalogoAtributosTaxonomicos::reemplazarAtributos);
 
         List<Hallazgo> desdeBd = repo.listarHallazgos();
         if (!desdeBd.isEmpty()) {
