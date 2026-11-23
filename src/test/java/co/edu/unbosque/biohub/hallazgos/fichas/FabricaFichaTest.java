@@ -1,17 +1,26 @@
 package co.edu.unbosque.biohub.hallazgos.fichas;
 
+import co.edu.unbosque.biohub.hallazgos.ServicioHallazgos;
 import co.edu.unbosque.biohub.hallazgos.dominio.AtributoDinamico;
 import co.edu.unbosque.biohub.hallazgos.dominio.TipoDato;
-
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FabricaFichaTest {
+
+    @BeforeEach
+    @AfterEach
+    void restaurarCatalogoPorDefecto() {
+        CatalogoAtributosTaxonomicos.restablecerPorDefecto();
+    }
 
     @Test
     void fabricaAnfibioDebeCrearFichaDeAnfibio() {
@@ -91,5 +100,103 @@ class FabricaFichaTest {
         );
 
         assertTrue(error.getMessage().contains("longitudCorporal"));
+    }
+
+    @Test
+    void debeFallarSiAtributoObligatorioVieneEnBlanco() {
+        FabricaFicha fabrica = new FabricaAnfibio();
+        List<AtributoDinamico> atributosConBlanco = List.of(
+                new AtributoDinamico("temperaturaAgua", TipoDato.DECIMAL, "18.5"),
+                new AtributoDinamico("grabacionAcustica", TipoDato.TEXTO, "   ")
+        );
+
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> fabrica.registrar(atributosConBlanco)
+        );
+
+        assertTrue(error.getMessage().contains("grabacionAcustica"));
+    }
+
+    @Test
+    void debeFallarSiListaDeAtributosEsNula() {
+        FabricaFicha fabrica = new FabricaAveMigratoria();
+
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> fabrica.registrar(null)
+        );
+
+        assertTrue(error.getMessage().contains("rutaGps"));
+        assertTrue(error.getMessage().contains("muestraAdn"));
+    }
+
+    @Test
+    void debeExigirAtributoNuevoAgregadoDinamicamenteSinModificarCodigo() {
+        CatalogoAtributosTaxonomicos.agregarAtributo("ANFIBIO", "phAgua", TipoDato.DECIMAL);
+
+        FabricaFicha fabrica = new FabricaAnfibio();
+        Map<String, TipoDato> definicion = fabrica.obtenerDefinicionAtributos();
+        assertEquals(TipoDato.DECIMAL, definicion.get("phAgua"));
+
+        List<AtributoDinamico> sinAtributoNuevo = List.of(
+                new AtributoDinamico("temperaturaAgua", TipoDato.DECIMAL, "18.5"),
+                new AtributoDinamico("grabacionAcustica", TipoDato.TEXTO, "canto_rana.mp3")
+        );
+
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> fabrica.registrar(sinAtributoNuevo)
+        );
+        assertTrue(error.getMessage().contains("phAgua"));
+
+        List<AtributoDinamico> completos = List.of(
+                new AtributoDinamico("temperaturaAgua", TipoDato.DECIMAL, "18.5"),
+                new AtributoDinamico("grabacionAcustica", TipoDato.TEXTO, "canto_rana.mp3"),
+                new AtributoDinamico("phAgua", TipoDato.DECIMAL, "6.8")
+        );
+        FichaTaxonomica ficha = fabrica.registrar(completos);
+        assertEquals("ANFIBIO", ficha.getGrupo());
+    }
+
+    @Test
+    void servicioHallazgosDebeAgregarAtributoYValidarMedianteFactoryMethod() {
+        ServicioHallazgos servicio = new ServicioHallazgos();
+        Map<String, TipoDato> actualizados = servicio.agregarAtributoAGrupo(
+                "AVE_MIGRATORIA",
+                "altitudVuelo",
+                TipoDato.ENTERO
+        );
+        assertEquals(TipoDato.ENTERO, actualizados.get("altitudVuelo"));
+
+        List<AtributoDinamico> incompletos = List.of(
+                new AtributoDinamico("rutaGps", TipoDato.TEXTO, "ruta_norte.gpx"),
+                new AtributoDinamico("muestraAdn", TipoDato.TEXTO, "ADN-4521")
+        );
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> servicio.validarYCrearFicha("AVE_MIGRATORIA", incompletos)
+        );
+        assertTrue(error.getMessage().contains("altitudVuelo"));
+
+        List<AtributoDinamico> completos = List.of(
+                new AtributoDinamico("rutaGps", TipoDato.TEXTO, "ruta_norte.gpx"),
+                new AtributoDinamico("muestraAdn", TipoDato.TEXTO, "ADN-4521"),
+                new AtributoDinamico("altitudVuelo", TipoDato.ENTERO, "2400")
+        );
+        FichaTaxonomica ficha = servicio.validarYCrearFicha("AVE_MIGRATORIA", completos);
+        assertEquals("AVE_MIGRATORIA", ficha.getGrupo());
+    }
+
+    @Test
+    void servicioHallazgosDebeRechazarGrupoNoSoportado() {
+        ServicioHallazgos servicio = new ServicioHallazgos();
+
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> servicio.obtenerFabrica("MAMIFERO")
+        );
+
+        assertTrue(error.getMessage().contains("Grupo taxonómico no soportado"));
     }
 }
