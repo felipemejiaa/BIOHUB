@@ -6,15 +6,13 @@ import co.edu.unbosque.biohub.auditoria.ServicioReclasificacionTaxonomica;
 import co.edu.unbosque.biohub.autenticacion.PermisoOperacion;
 import co.edu.unbosque.biohub.autenticacion.ServicioAutenticacionRol;
 import co.edu.unbosque.biohub.autenticacion.SesionUsuario;
+import co.edu.unbosque.biohub.hallazgos.ServicioHallazgos;
 import co.edu.unbosque.biohub.hallazgos.dominio.AtributoDinamico;
 import co.edu.unbosque.biohub.hallazgos.dominio.Especie;
 import co.edu.unbosque.biohub.hallazgos.dominio.Hallazgo;
 import co.edu.unbosque.biohub.hallazgos.dominio.RolEnum;
 import co.edu.unbosque.biohub.hallazgos.dominio.TipoDato;
-import co.edu.unbosque.biohub.hallazgos.fichas.FichaAnfibio;
-import co.edu.unbosque.biohub.hallazgos.fichas.FichaAveMigratoria;
-import co.edu.unbosque.biohub.hallazgos.fichas.FichaPlanta;
-import co.edu.unbosque.biohub.hallazgos.fichas.FichaReptil;
+import co.edu.unbosque.biohub.hallazgos.fichas.FabricaFicha;
 import co.edu.unbosque.biohub.hallazgos.fichas.FichaTaxonomica;
 import co.edu.unbosque.biohub.persistencia.BioHubRepositorioJdbc;
 import co.edu.unbosque.biohub.seguridad.AutorizacionUbicacion;
@@ -44,6 +42,7 @@ public class HallazgosBioHubController {
     private final ServicioReclasificacionTaxonomica servicioAuditoria;
     private final ServicioAutenticacionRol servicioAuth;
     private final AutorizacionUbicacion autorizacionUbicacion;
+    private final ServicioHallazgos servicioHallazgos;
     private final Optional<BioHubRepositorioJdbc> repoJdbc;
     private final AtomicLong secuenciaId = new AtomicLong(102L);
 
@@ -51,11 +50,13 @@ public class HallazgosBioHubController {
                                      ServicioReclasificacionTaxonomica servicioAuditoria,
                                      ServicioAutenticacionRol servicioAuth,
                                      AutorizacionUbicacion autorizacionUbicacion,
+                                     ServicioHallazgos servicioHallazgos,
                                      Optional<BioHubRepositorioJdbc> repoJdbc) {
         this.hallazgos = hallazgos;
         this.servicioAuditoria = servicioAuditoria;
         this.servicioAuth = servicioAuth;
         this.autorizacionUbicacion = autorizacionUbicacion;
+        this.servicioHallazgos = servicioHallazgos;
         this.repoJdbc = repoJdbc;
     }
 
@@ -73,6 +74,8 @@ public class HallazgosBioHubController {
     ) {}
 
     public record AtributoInput(String nombre, String tipo, String valor) {}
+
+    public record NuevoAtributoGrupoRequest(String nombre, String tipo) {}
 
     public record CrearHallazgoRequest(
             String grupoTaxonomico,
@@ -116,14 +119,52 @@ public class HallazgosBioHubController {
         )).toList();
     }
 
+    @GetMapping("/fichas/grupos")
+    public List<String> listarGruposTaxonomicos() {
+        return servicioHallazgos.listarGruposSoportados();
+    }
+
     @GetMapping("/fichas/{grupo}/requeridos")
     public ResponseEntity<?> obtenerAtributosRequeridos(@PathVariable String grupo) {
         try {
-            FichaTaxonomica ficha = obtenerFicha(grupo);
+            FabricaFicha fabrica = servicioHallazgos.obtenerFabrica(grupo);
             return ResponseEntity.ok(Map.of(
-                    "grupo", ficha.getGrupo(),
-                    "atributosRequeridos", ficha.getAtributosRequeridos()
+                    "grupo", fabrica.obtenerGrupo(),
+                    "atributosRequeridos", fabrica.obtenerDefinicionAtributos()
             ));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+        }
+    }
+
+    @PostMapping("/fichas/{grupo}/atributos")
+    public ResponseEntity<?> agregarAtributoGrupo(
+            @PathVariable String grupo,
+            @RequestHeader(value = "X-Auth-Token", required = false) String token,
+            @RequestBody NuevoAtributoGrupoRequest request) {
+        try {
+            servicioAuth.autorizar(token, PermisoOperacion.REGISTRAR_HALLAZGO);
+            if (request == null) {
+                return ResponseEntity.badRequest().body(Map.of("error", "El cuerpo de la petición es obligatorio"));
+            }
+            TipoDato tipoDato = (request.tipo() == null || request.tipo().isBlank())
+                    ? TipoDato.TEXTO
+                    : TipoDato.valueOf(request.tipo().trim().toUpperCase());
+
+            Map<String, TipoDato> actualizados = servicioHallazgos.agregarAtributoAGrupo(
+                    grupo,
+                    request.nombre(),
+                    tipoDato
+            );
+            String grupoNormalizado = servicioHallazgos.obtenerFabrica(grupo).obtenerGrupo();
+            repoJdbc.ifPresent(repo -> repo.guardarAtributosGrupo(grupoNormalizado, actualizados));
+
+            return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
+                    "grupo", grupoNormalizado,
+                    "atributosRequeridos", actualizados
+            ));
+        } catch (SecurityException ex) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", ex.getMessage()));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
         }
@@ -137,27 +178,28 @@ public class HallazgosBioHubController {
             servicioAuth.autorizar(token, PermisoOperacion.REGISTRAR_HALLAZGO);
             SesionUsuario sesion = servicioAuth.resolverSesion(token);
 
-            FichaTaxonomica ficha = obtenerFicha(request.grupoTaxonomico());
-            List<AtributoDinamico> atributos = new ArrayList<>();
+            Map<String, TipoDato> definicion = servicioHallazgos.obtenerAtributosRequeridos(request.grupoTaxonomico());
+            List<AtributoDinamico> atributosRecibidos = new ArrayList<>();
             if (request.atributos() != null) {
                 for (AtributoInput item : request.atributos()) {
-                    if (item.valor() != null && !item.valor().isBlank()) {
-                        atributos.add(new AtributoDinamico(
-                                item.nombre(),
-                                TipoDato.valueOf(item.tipo()),
-                                item.valor()
-                        ));
+                    if (item == null || item.nombre() == null || item.nombre().isBlank()) {
+                        continue;
                     }
+                    String nombre = item.nombre().trim();
+                    TipoDato tipo = (item.tipo() != null && !item.tipo().isBlank())
+                            ? TipoDato.valueOf(item.tipo().trim().toUpperCase())
+                            : definicion.getOrDefault(nombre, TipoDato.TEXTO);
+                    atributosRecibidos.add(new AtributoDinamico(nombre, tipo, item.valor()));
                 }
             }
 
-            List<String> erroresValidacion = ficha.validar(atributos);
-            if (!erroresValidacion.isEmpty()) {
-                return ResponseEntity.badRequest().body(Map.of(
-                        "error", "Faltan atributos obligatorios para " + ficha.getGrupo(),
-                        "faltantes", erroresValidacion
-                ));
-            }
+            FichaTaxonomica ficha = servicioHallazgos.validarYCrearFicha(
+                    request.grupoTaxonomico(),
+                    atributosRecibidos
+            );
+            List<AtributoDinamico> atributos = atributosRecibidos.stream()
+                    .filter(a -> a.valor() != null && !a.valor().isBlank())
+                    .toList();
 
             LocalDateTime ahora = LocalDateTime.now();
             Hallazgo nuevo;
@@ -302,15 +344,5 @@ public class HallazgosBioHubController {
         } catch (SecurityException ex) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", ex.getMessage()));
         }
-    }
-
-    private FichaTaxonomica obtenerFicha(String grupo) {
-        return switch (grupo.toUpperCase()) {
-            case "ANFIBIO" -> new FichaAnfibio();
-            case "AVE_MIGRATORIA" -> new FichaAveMigratoria();
-            case "PLANTA" -> new FichaPlanta();
-            case "REPTIL" -> new FichaReptil();
-            default -> throw new IllegalArgumentException("Grupo taxonómico no soportado: " + grupo);
-        };
     }
 }

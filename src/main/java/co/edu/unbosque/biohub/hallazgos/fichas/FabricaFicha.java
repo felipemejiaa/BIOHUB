@@ -1,12 +1,22 @@
 package co.edu.unbosque.biohub.hallazgos.fichas;
 
 import co.edu.unbosque.biohub.hallazgos.dominio.AtributoDinamico;
+import co.edu.unbosque.biohub.hallazgos.dominio.TipoDato;
 
 import java.util.List;
+import java.util.Map;
 
 public abstract class FabricaFicha {
 
     protected abstract FichaTaxonomica crearFicha();
+
+    public String obtenerGrupo() {
+        return crearFicha().getGrupo();
+    }
+
+    public Map<String, TipoDato> obtenerDefinicionAtributos() {
+        return crearFicha().getDefinicionAtributos();
+    }
 
     public FichaTaxonomica registrar(List<AtributoDinamico> atributos) {
         FichaTaxonomica ficha = crearFicha();              // 1. pide la ficha
