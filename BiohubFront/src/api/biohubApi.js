@@ -42,8 +42,16 @@ export const biohubApi = {
 
   listarHallazgos: () => request('/api/biohub/hallazgos'),
 
+  listarGrupos: () => request('/api/biohub/fichas/grupos'),
+
   obtenerRequeridos: (grupo) =>
     request(`/api/biohub/fichas/${grupo}/requeridos`),
+
+  agregarAtributoGrupo: (grupo, nombre, tipo) =>
+    request(`/api/biohub/fichas/${grupo}/atributos`, {
+      method: 'POST',
+      body: JSON.stringify({ nombre, tipo }),
+    }),
 
   registrarHallazgo: (payload) =>
     request('/api/biohub/hallazgos', {

@@ -33,30 +33,52 @@ const FORMULARIO_VACIO = {
   longitud: '',
 };
 
+const definicionLocal = (grupo) =>
+  Object.entries(GRUPOS[grupo]?.atributos || {}).reduce((acc, [nombre, meta]) => {
+    acc[nombre] = meta.tipo || 'TEXTO';
+    return acc;
+  }, {});
+
+const normalizarDefinicion = (raw, grupo) => {
+  if (raw && !Array.isArray(raw) && typeof raw === 'object') {
+    return raw;
+  }
+  if (Array.isArray(raw)) {
+    return raw.reduce((acc, nombre) => {
+      acc[nombre] = infoAtributo(nombre).tipo || 'TEXTO';
+      return acc;
+    }, {});
+  }
+  return definicionLocal(grupo);
+};
+
 export function InvestigadorPage() {
   const { hallazgos, cargando, recargar } = useHallazgos();
   const notificar = useToast();
   const [grupo, setGrupo] = useState('ANFIBIO');
-  const [requeridos, setRequeridos] = useState([]);
+  const [definicionAtributos, setDefinicionAtributos] = useState(() => definicionLocal('ANFIBIO'));
   const [valores, setValores] = useState({});
   const [form, setForm] = useState(FORMULARIO_VACIO);
   const [error, setError] = useState('');
   const [enviando, setEnviando] = useState(false);
   const [busqueda, setBusqueda] = useState('');
   const [seleccionado, setSeleccionado] = useState(null);
+  const [modalAtributoAbierto, setModalAtributoAbierto] = useState(false);
+  const [nuevoAtributo, setNuevoAtributo] = useState({ nombre: '', tipo: 'TEXTO' });
+  const [guardandoAtributo, setGuardandoAtributo] = useState(false);
+  const [errorAtributo, setErrorAtributo] = useState('');
 
-  // El backend responde con la lista de atributos obligatorios de la ficha (Factory Method).
+  // El backend responde con la definición tipada { nombre: TipoDato } de la ficha (Factory Method).
   useEffect(() => {
     let activo = true;
     biohubApi
       .obtenerRequeridos(grupo)
       .then((res) => {
         if (!activo) return;
-        const lista = res.atributosRequeridos;
-        setRequeridos(Array.isArray(lista) ? lista : Object.keys(lista || {}));
+        setDefinicionAtributos(normalizarDefinicion(res.atributosRequeridos, grupo));
         setValores({});
       })
-      .catch(() => activo && setRequeridos(Object.keys(GRUPOS[grupo].atributos)));
+      .catch(() => activo && setDefinicionAtributos(definicionLocal(grupo)));
     return () => {
       activo = false;
     };
@@ -72,9 +94,9 @@ export function InvestigadorPage() {
     setError('');
     setEnviando(true);
     try {
-      const atributos = requeridos.map((nombre) => ({
+      const atributos = Object.entries(definicionAtributos).map(([nombre, tipo]) => ({
         nombre,
-        tipo: infoAtributo(nombre).tipo,
+        tipo: tipo || infoAtributo(nombre).tipo || 'TEXTO',
         valor: (valores[nombre] || '').trim(),
       }));
 
@@ -100,6 +122,28 @@ export function InvestigadorPage() {
       setError(err.message);
     } finally {
       setEnviando(false);
+    }
+  };
+
+  const handleAgregarAtributo = async (e) => {
+    e.preventDefault();
+    const nombreLimpio = nuevoAtributo.nombre.trim();
+    if (!nombreLimpio) {
+      setErrorAtributo('El nombre del atributo es obligatorio.');
+      return;
+    }
+    setErrorAtributo('');
+    setGuardandoAtributo(true);
+    try {
+      const res = await biohubApi.agregarAtributoGrupo(grupo, nombreLimpio, nuevoAtributo.tipo);
+      setDefinicionAtributos(normalizarDefinicion(res.atributosRequeridos, grupo));
+      setModalAtributoAbierto(false);
+      setNuevoAtributo({ nombre: '', tipo: 'TEXTO' });
+      notificar(`Atributo "${nombreLimpio}" agregado a ${GRUPOS[grupo].nombre} sin modificar código.`);
+    } catch (err) {
+      setErrorAtributo(err.message);
+    } finally {
+      setGuardandoAtributo(false);
     }
   };
 
@@ -261,27 +305,53 @@ export function InvestigadorPage() {
               Ficha de {GRUPOS[grupo].nombre.toLowerCase()}
             </h2>
             <div className="fila-2">
-              {requeridos.map((nombre) => {
+              {Object.entries(definicionAtributos).map(([nombre, tipoBackend]) => {
                 const info = infoAtributo(nombre);
-                const numerico = info.tipo === 'DECIMAL' || info.tipo === 'ENTERO';
+                const tipoDato = tipoBackend || info.tipo || 'TEXTO';
                 return (
                   <div className="campo" key={nombre}>
                     <label htmlFor={`attr-${nombre}`}>
                       {info.etiqueta}
-                      {info.unidad && <span className="texto-suave"> ({info.unidad})</span>}
+                      <span className="texto-suave">
+                        {info.unidad ? ` (${info.unidad})` : ` · ${tipoDato.toLowerCase()}`}
+                      </span>
                     </label>
-                    <input
-                      id={`attr-${nombre}`}
-                      type={numerico ? 'number' : 'text'}
-                      step={info.tipo === 'DECIMAL' ? 'any' : undefined}
-                      value={valores[nombre] || ''}
-                      onChange={(e) => setValores((v) => ({ ...v, [nombre]: e.target.value }))}
-                      placeholder={info.ejemplo}
-                      required
-                    />
+                    {tipoDato === 'BOOLEANO' ? (
+                      <select
+                        id={`attr-${nombre}`}
+                        value={valores[nombre] || ''}
+                        onChange={(e) => setValores((v) => ({ ...v, [nombre]: e.target.value }))}
+                      >
+                        <option value="">Selecciona una opción</option>
+                        <option value="true">Sí</option>
+                        <option value="false">No</option>
+                      </select>
+                    ) : (
+                      <input
+                        id={`attr-${nombre}`}
+                        type={tipoDato === 'DECIMAL' || tipoDato === 'ENTERO' ? 'number' : 'text'}
+                        step={tipoDato === 'DECIMAL' ? 'any' : tipoDato === 'ENTERO' ? '1' : undefined}
+                        value={valores[nombre] || ''}
+                        onChange={(e) => setValores((v) => ({ ...v, [nombre]: e.target.value }))}
+                        placeholder={info.ejemplo || `Ingresa ${nombre}`}
+                      />
+                    )}
                   </div>
                 );
               })}
+            </div>
+            <div style={{ marginTop: '0.75rem' }}>
+              <button
+                type="button"
+                className="btn btn-fantasma btn-pequeno"
+                onClick={() => {
+                  setErrorAtributo('');
+                  setModalAtributoAbierto(true);
+                }}
+              >
+                <Icono nombre="mas" tamano={14} />
+                Agregar atributo a {GRUPOS[grupo].nombre.toLowerCase()}
+              </button>
             </div>
           </section>
 
@@ -353,6 +423,52 @@ export function InvestigadorPage() {
 
       <Modal abierto={Boolean(seleccionado)} onCerrar={() => setSeleccionado(null)} titulo="Ficha del hallazgo">
         {seleccionado && <FichaHallazgo hallazgo={seleccionado} />}
+      </Modal>
+
+      <Modal
+        abierto={modalAtributoAbierto}
+        onCerrar={() => setModalAtributoAbierto(false)}
+        titulo={`Nuevo atributo para ${GRUPOS[grupo].nombre.toLowerCase()}`}
+        ancho={460}
+      >
+        <form className="formulario" onSubmit={handleAgregarAtributo}>
+          <div className="campo">
+            <label htmlFor="nuevo-attr-nombre">Nombre del atributo</label>
+            <input
+              id="nuevo-attr-nombre"
+              value={nuevoAtributo.nombre}
+              onChange={(e) => setNuevoAtributo((prev) => ({ ...prev, nombre: e.target.value }))}
+              placeholder="ej. phAgua, altitudMetros"
+              required
+            />
+          </div>
+          <div className="campo">
+            <label htmlFor="nuevo-attr-tipo">Tipo de dato</label>
+            <select
+              id="nuevo-attr-tipo"
+              value={nuevoAtributo.tipo}
+              onChange={(e) => setNuevoAtributo((prev) => ({ ...prev, tipo: e.target.value }))}
+            >
+              <option value="TEXTO">TEXTO</option>
+              <option value="DECIMAL">DECIMAL</option>
+              <option value="ENTERO">ENTERO</option>
+              <option value="BOOLEANO">BOOLEANO</option>
+            </select>
+          </div>
+          {errorAtributo && <Aviso>{errorAtributo}</Aviso>}
+          <div className="formulario-acciones">
+            <button
+              type="button"
+              className="btn btn-fantasma"
+              onClick={() => setModalAtributoAbierto(false)}
+            >
+              Cancelar
+            </button>
+            <button type="submit" className="btn btn-primario" disabled={guardandoAtributo}>
+              {guardandoAtributo ? 'Guardando…' : 'Guardar atributo'}
+            </button>
+          </div>
+        </form>
       </Modal>
     </Pagina>
   );
