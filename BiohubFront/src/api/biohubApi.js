@@ -58,4 +58,9 @@ export const biohubApi = {
     }),
 
   obtenerHistorial: (id) => request(`/api/biohub/hallazgos/${id}/historial`),
+
+  comparar: (id, inicio, fin) =>
+    request(
+      `/api/biohub/hallazgos/${id}/comparar?inicio=${encodeURIComponent(inicio)}&fin=${encodeURIComponent(fin)}`
+    ),
 };
