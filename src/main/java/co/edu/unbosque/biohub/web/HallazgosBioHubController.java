@@ -157,7 +157,6 @@ public class HallazgosBioHubController {
                     tipoDato
             );
             String grupoNormalizado = servicioHallazgos.obtenerFabrica(grupo).obtenerGrupo();
-            repoJdbc.ifPresent(repo -> repo.guardarAtributosGrupo(grupoNormalizado, actualizados));
 
             return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
                     "grupo", grupoNormalizado,

@@ -7,6 +7,7 @@ import co.edu.unbosque.biohub.hallazgos.dominio.Hallazgo;
 import co.edu.unbosque.biohub.hallazgos.dominio.RolEnum;
 import co.edu.unbosque.biohub.hallazgos.dominio.TipoDato;
 import co.edu.unbosque.biohub.hallazgos.fichas.CatalogoAtributosTaxonomicos;
+import co.edu.unbosque.biohub.hallazgos.fichas.RepositorioAtributosGrupo;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -22,7 +23,7 @@ import java.util.Map;
 
 @Repository
 @Profile("postgres")
-public class BioHubRepositorioJdbc {
+public class BioHubRepositorioJdbc implements RepositorioAtributosGrupo {
 
     private final JdbcTemplate jdbc;
     private final JsonMapper mapper = JsonMapper.builder().build();
@@ -82,6 +83,7 @@ public class BioHubRepositorioJdbc {
         });
     }
 
+    @Override
     public Map<String, Map<String, TipoDato>> listarAtributosPorGrupo() {
         String sql = """
                 SELECT grupo_taxonomico, atributos_requeridos::text AS atributos_json
@@ -102,6 +104,7 @@ public class BioHubRepositorioJdbc {
         return resultado;
     }
 
+    @Override
     public void guardarAtributosGrupo(String grupoTaxonomico, Map<String, TipoDato> atributos) {
         if (grupoTaxonomico == null || grupoTaxonomico.isBlank()) {
             throw new IllegalArgumentException("El grupo taxonómico es obligatorio");

@@ -7,8 +7,10 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -198,5 +200,60 @@ class FabricaFichaTest {
         );
 
         assertTrue(error.getMessage().contains("Grupo taxonómico no soportado"));
+    }
+
+    @Test
+    void servicioHallazgosDebeAceptarNuevaFabricaInyectadaSinModificarCodigo() {
+        FabricaFicha fabricaMamifero = new FabricaFicha() {
+            @Override
+            protected FichaTaxonomica crearFicha() {
+                return new FichaTaxonomica() {
+                    @Override
+                    public String getGrupo() {
+                        return "MAMIFERO";
+                    }
+
+                    @Override
+                    public List<String> getAtributosRequeridos() {
+                        return List.of("tipoPelaje");
+                    }
+
+                    @Override
+                    public Map<String, TipoDato> getDefinicionAtributos() {
+                        return Map.of("tipoPelaje", TipoDato.TEXTO);
+                    }
+                };
+            }
+        };
+
+        ServicioHallazgos servicioExtendido = new ServicioHallazgos(List.of(fabricaMamifero), Optional.empty());
+
+        FichaTaxonomica ficha = servicioExtendido.validarYCrearFicha(
+                "MAMIFERO",
+                List.of(new AtributoDinamico("tipoPelaje", TipoDato.TEXTO, "denso"))
+        );
+        assertEquals("MAMIFERO", ficha.getGrupo());
+    }
+
+    @Test
+    void servicioHallazgosDebePersistirAtributoMedianteInterfazRepositorio() {
+        Map<String, Map<String, TipoDato>> guardado = new HashMap<>();
+        RepositorioAtributosGrupo stubRepo = new RepositorioAtributosGrupo() {
+            @Override
+            public Map<String, Map<String, TipoDato>> listarAtributosPorGrupo() {
+                return guardado;
+            }
+
+            @Override
+            public void guardarAtributosGrupo(String grupoTaxonomico, Map<String, TipoDato> atributos) {
+                guardado.put(grupoTaxonomico, atributos);
+            }
+        };
+
+        ServicioHallazgos servicio = new ServicioHallazgos(List.of(new FabricaAnfibio()), Optional.of(stubRepo));
+        servicio.agregarAtributoAGrupo("ANFIBIO", "phAgua", TipoDato.DECIMAL);
+
+        assertTrue(guardado.containsKey("ANFIBIO"));
+        assertEquals(TipoDato.DECIMAL, guardado.get("ANFIBIO").get("phAgua"));
     }
 }

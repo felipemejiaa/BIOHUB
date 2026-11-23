@@ -9,11 +9,14 @@ import co.edu.unbosque.biohub.hallazgos.fichas.FabricaFicha;
 import co.edu.unbosque.biohub.hallazgos.fichas.FabricaPlanta;
 import co.edu.unbosque.biohub.hallazgos.fichas.FabricaReptil;
 import co.edu.unbosque.biohub.hallazgos.fichas.FichaTaxonomica;
+import co.edu.unbosque.biohub.hallazgos.fichas.RepositorioAtributosGrupo;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Servicio de aplicación del módulo Hallazgos que orquesta la creación y validación
@@ -23,12 +26,27 @@ import java.util.Map;
 public class ServicioHallazgos {
 
     private final Map<String, FabricaFicha> fabricasPorGrupo = new LinkedHashMap<>();
+    private final Optional<RepositorioAtributosGrupo> repositorioAtributos;
 
     public ServicioHallazgos() {
-        registrarFabrica(new FabricaAnfibio());
-        registrarFabrica(new FabricaAveMigratoria());
-        registrarFabrica(new FabricaPlanta());
-        registrarFabrica(new FabricaReptil());
+        this(
+                List.of(
+                        new FabricaAnfibio(),
+                        new FabricaAveMigratoria(),
+                        new FabricaPlanta(),
+                        new FabricaReptil()
+                ),
+                Optional.empty()
+        );
+    }
+
+    @Autowired
+    public ServicioHallazgos(List<FabricaFicha> fabricas,
+                             Optional<RepositorioAtributosGrupo> repositorioAtributos) {
+        this.repositorioAtributos = repositorioAtributos == null ? Optional.empty() : repositorioAtributos;
+        if (fabricas != null) {
+            fabricas.forEach(this::registrarFabrica);
+        }
     }
 
     private void registrarFabrica(FabricaFicha fabrica) {
@@ -60,7 +78,10 @@ public class ServicioHallazgos {
 
     public Map<String, TipoDato> agregarAtributoAGrupo(String grupo, String nombreAtributo, TipoDato tipoDato) {
         FabricaFicha fabrica = obtenerFabrica(grupo);
-        CatalogoAtributosTaxonomicos.agregarAtributo(fabrica.obtenerGrupo(), nombreAtributo, tipoDato);
-        return fabrica.obtenerDefinicionAtributos();
+        String grupoNormalizado = fabrica.obtenerGrupo();
+        CatalogoAtributosTaxonomicos.agregarAtributo(grupoNormalizado, nombreAtributo, tipoDato);
+        Map<String, TipoDato> actualizados = fabrica.obtenerDefinicionAtributos();
+        repositorioAtributos.ifPresent(repo -> repo.guardarAtributosGrupo(grupoNormalizado, actualizados));
+        return actualizados;
     }
 }
