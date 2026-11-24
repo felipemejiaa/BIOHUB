@@ -5,7 +5,7 @@ import co.edu.unbosque.biohub.consulta.FichaPublicaEnmascarada;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 import tools.jackson.core.JacksonException;
@@ -22,7 +22,7 @@ import java.util.Set;
  * Solo almacena JSON de {@link FichaPublicaEnmascarada} con TTL configurable.
  */
 @Component
-@ConditionalOnBean(StringRedisTemplate.class)
+@ConditionalOnProperty(name = "biohub.cache.habilitada", havingValue = "true", matchIfMissing = true)
 public class CacheFichasPublicasRedis implements CacheFichasPublicas {
 
     public static final String CLAVE_CATALOGO = "biohub:publico:catalogo";
