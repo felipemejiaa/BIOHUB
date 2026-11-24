@@ -46,9 +46,15 @@ CREATE TABLE IF NOT EXISTS reporte_deforestacion (
     solicitado_por  VARCHAR(50) NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS configuracion_grupo_taxonomico (
+    grupo_taxonomico     VARCHAR(50) PRIMARY KEY,
+    atributos_requeridos JSONB NOT NULL DEFAULT '{}'
+);
+
 CREATE INDEX IF NOT EXISTS idx_hallazgo_especie ON hallazgo(especie_id);
 CREATE INDEX IF NOT EXISTS idx_hallazgo_departamento ON hallazgo(departamento);
 CREATE INDEX IF NOT EXISTS idx_hallazgo_fecha ON hallazgo(fecha_observacion);
 CREATE INDEX IF NOT EXISTS idx_hallazgo_grupo ON hallazgo(grupo_taxonomico);
 CREATE INDEX IF NOT EXISTS idx_version_hallazgo ON version_hallazgo(hallazgo_id);
 CREATE INDEX IF NOT EXISTS idx_hallazgo_atributos ON hallazgo USING GIN(atributos);
+CREATE INDEX IF NOT EXISTS idx_config_grupo_atributos ON configuracion_grupo_taxonomico USING GIN(atributos_requeridos);
