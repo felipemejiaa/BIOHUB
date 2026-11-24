@@ -6,6 +6,10 @@ import co.edu.unbosque.biohub.auditoria.ServicioReclasificacionTaxonomica;
 import co.edu.unbosque.biohub.autenticacion.PermisoOperacion;
 import co.edu.unbosque.biohub.autenticacion.ServicioAutenticacionRol;
 import co.edu.unbosque.biohub.autenticacion.SesionUsuario;
+import co.edu.unbosque.biohub.consulta.EstadoCache;
+import co.edu.unbosque.biohub.consulta.FichaPublicaEnmascarada;
+import co.edu.unbosque.biohub.consulta.ResultadoConsulta;
+import co.edu.unbosque.biohub.consulta.ServicioConsultaPublica;
 import co.edu.unbosque.biohub.hallazgos.ServicioHallazgos;
 import co.edu.unbosque.biohub.hallazgos.dominio.AtributoDinamico;
 import co.edu.unbosque.biohub.hallazgos.dominio.Especie;
@@ -38,11 +42,14 @@ import java.util.concurrent.atomic.AtomicLong;
 @RequestMapping("/api/biohub")
 public class HallazgosBioHubController {
 
+    public static final String HEADER_CACHE_STATUS = "X-Cache-Status";
+
     private final List<Hallazgo> hallazgos;
     private final ServicioReclasificacionTaxonomica servicioAuditoria;
     private final ServicioAutenticacionRol servicioAuth;
     private final AutorizacionUbicacion autorizacionUbicacion;
     private final ServicioHallazgos servicioHallazgos;
+    private final ServicioConsultaPublica servicioConsultaPublica;
     private final Optional<BioHubRepositorioJdbc> repoJdbc;
     private final AtomicLong secuenciaId = new AtomicLong(102L);
 
@@ -51,12 +58,14 @@ public class HallazgosBioHubController {
                                      ServicioAutenticacionRol servicioAuth,
                                      AutorizacionUbicacion autorizacionUbicacion,
                                      ServicioHallazgos servicioHallazgos,
+                                     ServicioConsultaPublica servicioConsultaPublica,
                                      Optional<BioHubRepositorioJdbc> repoJdbc) {
         this.hallazgos = hallazgos;
         this.servicioAuditoria = servicioAuditoria;
         this.servicioAuth = servicioAuth;
         this.autorizacionUbicacion = autorizacionUbicacion;
         this.servicioHallazgos = servicioHallazgos;
+        this.servicioConsultaPublica = servicioConsultaPublica;
         this.repoJdbc = repoJdbc;
     }
 
@@ -100,23 +109,58 @@ public class HallazgosBioHubController {
     ) {}
 
     @GetMapping("/hallazgos")
-    public List<HallazgoVistaDTO> listarHallazgos(
+    public ResponseEntity<List<HallazgoVistaDTO>> listarHallazgos(
             @RequestHeader(value = "X-Auth-Token", required = false) String token) {
         SesionUsuario sesion = servicioAuth.resolverSesion(token);
-        boolean revelaExactas = autorizacionUbicacion.revelaCoordenadas(sesion.getRol());
 
-        return hallazgos.stream().map(h -> new HallazgoVistaDTO(
-                h.getId(),
-                h.getEspecie().getNombreCientifico(),
-                h.getEspecie().getNombreComun(),
-                h.getEspecie().getEstadoConservacion(),
-                h.getEspecie().esSensible(),
-                autorizacionUbicacion.decidir(sesion.getRol(), h),
-                revelaExactas,
-                h.getDepartamento(),
-                h.getFechaObservacion(),
-                h.getAtributos()
-        )).toList();
+        if (servicioConsultaPublica.usaCachePublica(sesion.getRol())) {
+            ResultadoConsulta<List<FichaPublicaEnmascarada>> resultado =
+                    servicioConsultaPublica.consultarCatalogoPublico(() -> hallazgos);
+            List<HallazgoVistaDTO> vistas = resultado.datos().stream()
+                    .map(this::aVistaPublica)
+                    .toList();
+            return ResponseEntity.ok()
+                    .header(HEADER_CACHE_STATUS, resultado.estadoCache().name())
+                    .body(vistas);
+        }
+
+        List<HallazgoVistaDTO> vistas = hallazgos.stream()
+                .map(h -> aVistaCompleta(h, sesion.getRol()))
+                .toList();
+        return ResponseEntity.ok()
+                .header(HEADER_CACHE_STATUS, EstadoCache.BYPASS.name())
+                .body(vistas);
+    }
+
+    @GetMapping("/hallazgos/{id}")
+    public ResponseEntity<?> obtenerHallazgo(
+            @PathVariable Long id,
+            @RequestHeader(value = "X-Auth-Token", required = false) String token) {
+        SesionUsuario sesion = servicioAuth.resolverSesion(token);
+
+        if (servicioConsultaPublica.usaCachePublica(sesion.getRol())) {
+            ResultadoConsulta<Optional<FichaPublicaEnmascarada>> resultado =
+                    servicioConsultaPublica.consultarFichaPublica(id, () -> buscarHallazgoPorId(id));
+            String estadoCache = resultado.estadoCache().name();
+            if (resultado.datos().isEmpty()) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                        .header(HEADER_CACHE_STATUS, estadoCache)
+                        .body(Map.of("error", "Hallazgo no encontrado: " + id));
+            }
+            return ResponseEntity.ok()
+                    .header(HEADER_CACHE_STATUS, estadoCache)
+                    .body(aVistaPublica(resultado.datos().get()));
+        }
+
+        Optional<Hallazgo> hallazgo = buscarHallazgoPorId(id);
+        if (hallazgo.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .header(HEADER_CACHE_STATUS, EstadoCache.BYPASS.name())
+                    .body(Map.of("error", "Hallazgo no encontrado: " + id));
+        }
+        return ResponseEntity.ok()
+                .header(HEADER_CACHE_STATUS, EstadoCache.BYPASS.name())
+                .body(aVistaCompleta(hallazgo.get(), sesion.getRol()));
     }
 
     @GetMapping("/fichas/grupos")
@@ -253,6 +297,8 @@ public class HallazgosBioHubController {
                 repoJdbc.get().guardarVersionMemento(historial.getLast());
             }
 
+            servicioConsultaPublica.invalidarCache();
+
             return ResponseEntity.status(HttpStatus.CREATED).body(nuevo);
         } catch (SecurityException ex) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", ex.getMessage()));
@@ -302,6 +348,8 @@ public class HallazgosBioHubController {
                 repoJdbc.get().guardarVersionMemento(historial.getLast());
             }
 
+            servicioConsultaPublica.invalidarFicha(id);
+
             return ResponseEntity.ok(actualizado);
         } catch (SecurityException ex) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", ex.getMessage()));
@@ -343,5 +391,44 @@ public class HallazgosBioHubController {
         } catch (SecurityException ex) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", ex.getMessage()));
         }
+    }
+
+    private Optional<Hallazgo> buscarHallazgoPorId(Long id) {
+        if (id == null) {
+            return Optional.empty();
+        }
+        return hallazgos.stream()
+                .filter(h -> id.equals(h.getId()))
+                .findFirst();
+    }
+
+    private HallazgoVistaDTO aVistaPublica(FichaPublicaEnmascarada ficha) {
+        return new HallazgoVistaDTO(
+                ficha.id(),
+                ficha.nombreCientifico(),
+                ficha.nombreComun(),
+                ficha.estadoConservacion(),
+                ficha.esSensible(),
+                ficha.ubicacionVisible(),
+                false,
+                ficha.departamento(),
+                ficha.fechaObservacion(),
+                ficha.atributos()
+        );
+    }
+
+    private HallazgoVistaDTO aVistaCompleta(Hallazgo hallazgo, RolEnum rol) {
+        return new HallazgoVistaDTO(
+                hallazgo.getId(),
+                hallazgo.getEspecie().getNombreCientifico(),
+                hallazgo.getEspecie().getNombreComun(),
+                hallazgo.getEspecie().getEstadoConservacion(),
+                hallazgo.getEspecie().esSensible(),
+                autorizacionUbicacion.decidir(rol, hallazgo),
+                true,
+                hallazgo.getDepartamento(),
+                hallazgo.getFechaObservacion(),
+                hallazgo.getAtributos()
+        );
     }
 }
